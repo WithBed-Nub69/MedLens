@@ -8,6 +8,7 @@ import uuid
 from typing import Optional, List
 from datetime import date
 from fastapi import UploadFile
+from supabase import Client
 from app.database.client import get_service_client
 from app.models.schemas import ReportType
 import logging
@@ -32,6 +33,7 @@ async def upload_report(
     file: UploadFile,
     report_type: str = "other",
     report_date: Optional[date] = None,
+    client: Optional[Client] = None,
 ) -> dict:
     """
     Upload a medical report to private Storage and insert a medical_reports row.
@@ -55,10 +57,10 @@ async def upload_report(
     safe_filename = file.filename.replace(" ", "_") if file.filename else "report"
     storage_path = f"{user_id}/{patient_id}/{report_id}/{safe_filename}"
 
-    client = get_service_client()
+    db = client or get_service_client()
 
     # Upload to Storage
-    client.storage.from_(BUCKET).upload(
+    db.storage.from_(BUCKET).upload(
         path=storage_path,
         file=file_bytes,
         file_options={"content-type": content_type, "upsert": "false"},
@@ -74,21 +76,21 @@ async def upload_report(
         "report_date": report_date.isoformat() if report_date else None,
         "processing_status": "pending",
     }
-    result = client.table("medical_reports").insert(payload).execute()
+    result = db.table("medical_reports").insert(payload).execute()
     if not result.data:
         raise RuntimeError("Failed to create report record")
 
     return result.data[0]
 
 
-async def get_reports_for_patient(user_id: str, patient_id: str) -> List[dict]:
+async def get_reports_for_patient(user_id: str, patient_id: str, client: Optional[Client] = None) -> List[dict]:
     """Fetch all reports for a patient. Ownership enforced via user_id."""
     from app.services.patient_service import assert_patient_ownership
-    await assert_patient_ownership(user_id, patient_id)
+    await assert_patient_ownership(user_id, patient_id, client=client)
 
-    client = get_service_client()
+    db = client or get_service_client()
     result = (
-        client.table("medical_reports")
+        db.table("medical_reports")
         .select("*")
         .eq("patient_id", patient_id)
         .order("created_at", desc=True)
@@ -97,11 +99,11 @@ async def get_reports_for_patient(user_id: str, patient_id: str) -> List[dict]:
     return result.data or []
 
 
-async def get_report(user_id: str, report_id: str) -> Optional[dict]:
+async def get_report(user_id: str, report_id: str, client: Optional[Client] = None) -> Optional[dict]:
     """Fetch a single report, verifying ownership via the patient relationship."""
-    client = get_service_client()
+    db = client or get_service_client()
     result = (
-        client.table("medical_reports")
+        db.table("medical_reports")
         .select("*, patients!inner(user_id)")
         .eq("id", report_id)
         .execute()
@@ -117,26 +119,27 @@ async def get_report(user_id: str, report_id: str) -> Optional[dict]:
     return report
 
 
-async def update_report_status(report_id: str, status: str, source_text: Optional[str] = None, model: Optional[str] = None) -> None:
-    client = get_service_client()
+async def update_report_status(report_id: str, status: str, source_text: Optional[str] = None, model: Optional[str] = None, client: Optional[Client] = None) -> None:
+    db = client or get_service_client()
     payload: dict = {"processing_status": status}
     if source_text is not None:
         payload["source_text"] = source_text
     if model is not None:
         payload["extraction_model"] = model
         payload["extraction_version"] = "1.0"
-    client.table("medical_reports").update(payload).eq("id", report_id).execute()
+    db.table("medical_reports").update(payload).eq("id", report_id).execute()
 
 
-async def download_report_bytes(storage_path: str) -> bytes:
-    """Download report file from private Storage using service-role client."""
-    client = get_service_client()
-    response = client.storage.from_(BUCKET).download(storage_path)
+async def download_report_bytes(storage_path: str, client: Optional[Client] = None) -> bytes:
+    """Download report file from private Storage using authenticated client."""
+    db = client or get_service_client()
+    response = db.storage.from_(BUCKET).download(storage_path)
     return response
 
 
-async def get_signed_url(storage_path: str, expires_in: int = 300) -> str:
+async def get_signed_url(storage_path: str, expires_in: int = 300, client: Optional[Client] = None) -> str:
     """Generate a short-lived signed URL for private bucket access."""
-    client = get_service_client()
-    result = client.storage.from_(BUCKET).create_signed_url(storage_path, expires_in)
+    db = client or get_service_client()
+    result = db.storage.from_(BUCKET).create_signed_url(storage_path, expires_in)
     return result.get("signedURL", "")
+

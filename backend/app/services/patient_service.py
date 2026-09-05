@@ -1,10 +1,12 @@
 """
 Patient service — CRUD operations with ownership enforcement.
-All writes go through the service-role client.
-All ownership checks use user_id comparison before DB access.
+User-initiated operations use the authenticated user's client, forwarding
+their JWT so PostgreSQL RLS policies evaluate against role 'authenticated'.
+Service-role client remains available as a fallback for internal tasks.
 """
 from typing import Optional, List
 from datetime import date
+from supabase import Client
 from app.database.client import get_service_client
 from app.models.schemas import PatientCreate, PatientUpdate
 import logging
@@ -16,10 +18,10 @@ def _serialize_date(d: Optional[date]) -> Optional[str]:
     return d.isoformat() if d else None
 
 
-async def create_patient(user_id: str, data: PatientCreate) -> dict:
-    client = get_service_client()
+async def create_patient(user_id: str, data: PatientCreate, client: Optional[Client] = None) -> dict:
+    db = client or get_service_client()
     payload = {
-        "user_id": user_id,
+        "user_id": user_id,  # taken from authenticated user's identity, NOT request body
         "full_name": data.full_name,
         "age": data.age,
         "sex": data.sex.value if data.sex else None,
@@ -31,16 +33,16 @@ async def create_patient(user_id: str, data: PatientCreate) -> dict:
         "medications": data.medications,
         "notes": data.notes,
     }
-    result = client.table("patients").insert(payload).execute()
+    result = db.table("patients").insert(payload).execute()
     if not result.data:
         raise RuntimeError("Failed to create patient")
     return result.data[0]
 
 
-async def get_patients(user_id: str) -> List[dict]:
-    client = get_service_client()
+async def get_patients(user_id: str, client: Optional[Client] = None) -> List[dict]:
+    db = client or get_service_client()
     result = (
-        client.table("patients")
+        db.table("patients")
         .select("*")
         .eq("user_id", user_id)
         .order("created_at", desc=True)
@@ -49,26 +51,25 @@ async def get_patients(user_id: str) -> List[dict]:
     return result.data or []
 
 
-async def get_patient(user_id: str, patient_id: str) -> Optional[dict]:
-    client = get_service_client()
+async def get_patient(user_id: str, patient_id: str, client: Optional[Client] = None) -> Optional[dict]:
+    db = client or get_service_client()
     result = (
-        client.table("patients")
+        db.table("patients")
         .select("*")
         .eq("id", patient_id)
         .eq("user_id", user_id)
-        .single()
         .execute()
     )
-    return result.data
+    return result.data[0] if result.data else None
 
 
-async def update_patient(user_id: str, patient_id: str, data: PatientUpdate) -> Optional[dict]:
+async def update_patient(user_id: str, patient_id: str, data: PatientUpdate, client: Optional[Client] = None) -> Optional[dict]:
+    db = client or get_service_client()
     # First verify ownership
-    existing = await get_patient(user_id, patient_id)
+    existing = await get_patient(user_id, patient_id, client=db)
     if not existing:
         return None
 
-    client = get_service_client()
     payload = {k: v for k, v in data.model_dump(exclude_none=True).items()}
 
     if "sex" in payload and hasattr(payload["sex"], "value"):
@@ -80,7 +81,7 @@ async def update_patient(user_id: str, patient_id: str, data: PatientUpdate) -> 
         return existing
 
     result = (
-        client.table("patients")
+        db.table("patients")
         .update(payload)
         .eq("id", patient_id)
         .eq("user_id", user_id)
@@ -89,9 +90,10 @@ async def update_patient(user_id: str, patient_id: str, data: PatientUpdate) -> 
     return result.data[0] if result.data else None
 
 
-async def assert_patient_ownership(user_id: str, patient_id: str) -> dict:
+async def assert_patient_ownership(user_id: str, patient_id: str, client: Optional[Client] = None) -> dict:
     """Raises ValueError if user does not own this patient."""
-    patient = await get_patient(user_id, patient_id)
+    patient = await get_patient(user_id, patient_id, client=client)
     if not patient:
         raise ValueError(f"Patient {patient_id} not found or access denied")
     return patient
+

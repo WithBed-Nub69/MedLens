@@ -7,7 +7,7 @@ from datetime import date
 from app.models.schemas import SuccessResponse
 from app.services import report_service
 from app.services.extraction_service import process_report, process_text_report
-from app.utils.auth import get_current_user_id
+from app.utils.auth import get_authenticated_user, AuthenticatedUser
 
 router = APIRouter(tags=["reports"])
 
@@ -20,12 +20,12 @@ async def upload_report(
     report_type: str = Form(default="other"),
     report_date: Optional[str] = Form(default=None),
     auto_process: bool = Form(default=True),
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     """Upload a medical report file (PDF or image)."""
     from app.services.patient_service import assert_patient_ownership
     try:
-        await assert_patient_ownership(user_id, patient_id)
+        await assert_patient_ownership(auth_user.user_id, patient_id, client=auth_user.client)
     except ValueError:
         raise HTTPException(status_code=404, detail="Patient not found")
 
@@ -39,11 +39,12 @@ async def upload_report(
 
     try:
         report = await report_service.upload_report(
-            user_id=user_id,
+            user_id=auth_user.user_id,
             patient_id=patient_id,
             file=file,
             report_type=report_type,
             report_date=parsed_date,
+            client=auth_user.client,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -53,7 +54,7 @@ async def upload_report(
     # Trigger AI processing in background
     if auto_process:
         background_tasks.add_task(
-            _safe_process_report, user_id, report["id"]
+            _safe_process_report, auth_user.user_id, report["id"], auth_user.token
         )
 
     return SuccessResponse(
@@ -62,10 +63,12 @@ async def upload_report(
     )
 
 
-async def _safe_process_report(user_id: str, report_id: str):
+async def _safe_process_report(user_id: str, report_id: str, token: str):
     """Background task wrapper with error swallowing."""
     try:
-        await process_report(user_id, report_id)
+        from app.database.client import get_user_client
+        client = get_user_client(token)
+        await process_report(user_id, report_id, client=client)
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"Background processing failed for {report_id}: {e}")
@@ -78,12 +81,12 @@ async def upload_text_report(
     text: str = Form(...),
     report_type: str = Form(default="lab"),
     report_date: Optional[str] = Form(default=None),
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     """Create a report from pasted text and process it."""
     from app.services.patient_service import assert_patient_ownership
     try:
-        await assert_patient_ownership(user_id, patient_id)
+        await assert_patient_ownership(auth_user.user_id, patient_id, client=auth_user.client)
     except ValueError:
         raise HTTPException(status_code=404, detail="Patient not found")
 
@@ -94,28 +97,13 @@ async def upload_text_report(
         except ValueError:
             pass
 
-    # Create a dummy upload object for text
-    import io
-    from fastapi import UploadFile as FUploadFile
-    from starlette.datastructures import UploadFile as StarletteUpload
-
-    # We'll store a placeholder file
-    dummy_bytes = text.encode("utf-8")
-    dummy_file = UploadFile(
-        filename="pasted_report.txt",
-        file=io.BytesIO(dummy_bytes),
-    )
-    dummy_file.content_type = "text/plain"
-
-    from app.database.client import get_service_client
     import uuid
     report_id = str(uuid.uuid4())
-    client = get_service_client()
-    result = client.table("medical_reports").insert({
+    result = auth_user.client.table("medical_reports").insert({
         "id": report_id,
         "patient_id": patient_id,
         "file_name": "pasted_report.txt",
-        "file_path": f"{user_id}/{patient_id}/{report_id}/pasted_report.txt",
+        "file_path": f"{auth_user.user_id}/{patient_id}/{report_id}/pasted_report.txt",
         "report_type": report_type,
         "report_date": parsed_date.isoformat() if parsed_date else None,
         "processing_status": "pending",
@@ -126,14 +114,16 @@ async def upload_text_report(
         raise HTTPException(status_code=500, detail="Failed to create report record")
 
     report = result.data[0]
-    background_tasks.add_task(_safe_process_text_report, user_id, report_id, text)
+    background_tasks.add_task(_safe_process_text_report, auth_user.user_id, report_id, text, auth_user.token)
 
     return SuccessResponse(message="Text report created and processing started", data=report)
 
 
-async def _safe_process_text_report(user_id: str, report_id: str, text: str):
+async def _safe_process_text_report(user_id: str, report_id: str, text: str, token: str):
     try:
-        await process_text_report(user_id, report_id, text)
+        from app.database.client import get_user_client
+        client = get_user_client(token)
+        await process_text_report(user_id, report_id, text, client=client)
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"Text processing failed for {report_id}: {e}")
@@ -142,10 +132,10 @@ async def _safe_process_text_report(user_id: str, report_id: str, text: str):
 @router.get("/patients/{patient_id}/reports", response_model=SuccessResponse)
 async def list_reports(
     patient_id: str,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     try:
-        reports = await report_service.get_reports_for_patient(user_id, patient_id)
+        reports = await report_service.get_reports_for_patient(auth_user.user_id, patient_id, client=auth_user.client)
         return SuccessResponse(data=reports)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -154,9 +144,9 @@ async def list_reports(
 @router.get("/reports/{report_id}", response_model=SuccessResponse)
 async def get_report(
     report_id: str,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
-    report = await report_service.get_report(user_id, report_id)
+    report = await report_service.get_report(auth_user.user_id, report_id, client=auth_user.client)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
     return SuccessResponse(data=report)
@@ -166,24 +156,25 @@ async def get_report(
 async def reprocess_report(
     report_id: str,
     background_tasks: BackgroundTasks,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     """Manually trigger (re)processing of a report."""
-    report = await report_service.get_report(user_id, report_id)
+    report = await report_service.get_report(auth_user.user_id, report_id, client=auth_user.client)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    background_tasks.add_task(_safe_process_report, user_id, report_id)
+    background_tasks.add_task(_safe_process_report, auth_user.user_id, report_id, auth_user.token)
     return SuccessResponse(message="Processing started")
 
 
 @router.get("/reports/{report_id}/signed-url", response_model=SuccessResponse)
 async def get_signed_url(
     report_id: str,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
-    report = await report_service.get_report(user_id, report_id)
+    report = await report_service.get_report(auth_user.user_id, report_id, client=auth_user.client)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-    url = await report_service.get_signed_url(report["file_path"])
+    url = await report_service.get_signed_url(report["file_path"], client=auth_user.client)
     return SuccessResponse(data={"url": url})
+

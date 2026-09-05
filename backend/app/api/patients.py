@@ -5,8 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from app.models.schemas import PatientCreate, PatientUpdate, PatientResponse, SuccessResponse
 from app.services import patient_service
-from app.utils.auth import get_current_user_id
+from app.utils.auth import get_authenticated_user, AuthenticatedUser
 from app.ai.summary_ai import generate_patient_summary, generate_clarification_questions
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/patients", tags=["patients"])
 
@@ -14,27 +17,28 @@ router = APIRouter(prefix="/patients", tags=["patients"])
 @router.post("", response_model=SuccessResponse, status_code=status.HTTP_201_CREATED)
 async def create_patient(
     data: PatientCreate,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     try:
-        patient = await patient_service.create_patient(user_id, data)
+        patient = await patient_service.create_patient(auth_user.user_id, data, client=auth_user.client)
         return SuccessResponse(message="Patient created", data=patient)
     except Exception as e:
+        logger.error(f"Failed to create patient: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("", response_model=SuccessResponse)
-async def list_patients(user_id: str = Depends(get_current_user_id)):
-    patients = await patient_service.get_patients(user_id)
+async def list_patients(auth_user: AuthenticatedUser = Depends(get_authenticated_user)):
+    patients = await patient_service.get_patients(auth_user.user_id, client=auth_user.client)
     return SuccessResponse(data=patients)
 
 
 @router.get("/{patient_id}", response_model=SuccessResponse)
 async def get_patient(
     patient_id: str,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
-    patient = await patient_service.get_patient(user_id, patient_id)
+    patient = await patient_service.get_patient(auth_user.user_id, patient_id, client=auth_user.client)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
     return SuccessResponse(data=patient)
@@ -44,9 +48,9 @@ async def get_patient(
 async def update_patient(
     patient_id: str,
     data: PatientUpdate,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
-    updated = await patient_service.update_patient(user_id, patient_id, data)
+    updated = await patient_service.update_patient(auth_user.user_id, patient_id, data, client=auth_user.client)
     if not updated:
         raise HTTPException(status_code=404, detail="Patient not found")
     return SuccessResponse(message="Patient updated", data=updated)
@@ -55,17 +59,15 @@ async def update_patient(
 @router.get("/{patient_id}/tests", response_model=SuccessResponse)
 async def get_patient_tests(
     patient_id: str,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     try:
-        await patient_service.assert_patient_ownership(user_id, patient_id)
+        await patient_service.assert_patient_ownership(auth_user.user_id, patient_id, client=auth_user.client)
     except ValueError:
         raise HTTPException(status_code=404, detail="Patient not found")
 
-    from app.database.client import get_service_client
-    client = get_service_client()
     result = (
-        client.table("medical_tests")
+        auth_user.client.table("medical_tests")
         .select("*")
         .eq("patient_id", patient_id)
         .order("created_at", desc=True)
@@ -77,15 +79,15 @@ async def get_patient_tests(
 @router.post("/{patient_id}/summary", response_model=SuccessResponse)
 async def generate_summary(
     patient_id: str,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     try:
-        await patient_service.assert_patient_ownership(user_id, patient_id)
+        await patient_service.assert_patient_ownership(auth_user.user_id, patient_id, client=auth_user.client)
     except ValueError:
         raise HTTPException(status_code=404, detail="Patient not found")
 
     try:
-        summary = await generate_patient_summary(patient_id)
+        summary = await generate_patient_summary(patient_id, client=auth_user.client)
         return SuccessResponse(message="Summary generated", data=summary)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -94,17 +96,15 @@ async def generate_summary(
 @router.get("/{patient_id}/summary", response_model=SuccessResponse)
 async def get_summary(
     patient_id: str,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     try:
-        await patient_service.assert_patient_ownership(user_id, patient_id)
+        await patient_service.assert_patient_ownership(auth_user.user_id, patient_id, client=auth_user.client)
     except ValueError:
         raise HTTPException(status_code=404, detail="Patient not found")
 
-    from app.database.client import get_service_client
-    client = get_service_client()
     result = (
-        client.table("ai_summaries")
+        auth_user.client.table("ai_summaries")
         .select("*")
         .eq("patient_id", patient_id)
         .order("created_at", desc=True)
@@ -118,12 +118,17 @@ async def get_summary(
 @router.get("/{patient_id}/clarifications", response_model=SuccessResponse)
 async def get_clarifications(
     patient_id: str,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     try:
-        await patient_service.assert_patient_ownership(user_id, patient_id)
+        await patient_service.assert_patient_ownership(auth_user.user_id, patient_id, client=auth_user.client)
     except ValueError:
         raise HTTPException(status_code=404, detail="Patient not found")
 
-    questions = await generate_clarification_questions(patient_id)
-    return SuccessResponse(data=questions)
+    try:
+        questions = await generate_clarification_questions(patient_id, client=auth_user.client)
+        return SuccessResponse(data=questions)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+

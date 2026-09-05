@@ -3,19 +3,20 @@ Medical Tests API — human verification and correction of extracted values.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
+from supabase import Client
 from app.models.schemas import MedicalTestUpdate, SuccessResponse
-from app.utils.auth import get_current_user_id
+from app.utils.auth import get_authenticated_user, AuthenticatedUser
 from app.utils.reference_range import calculate_status
 from app.database.client import get_service_client
 
 router = APIRouter(prefix="/tests", tags=["tests"])
 
 
-async def _assert_test_ownership(user_id: str, test_id: str) -> dict:
+async def _assert_test_ownership(user_id: str, test_id: str, client: Client | None = None) -> dict:
     """Verify the user owns the patient this test belongs to."""
-    client = get_service_client()
+    db = client or get_service_client()
     result = (
-        client.table("medical_tests")
+        db.table("medical_tests")
         .select("*, patients!inner(user_id)")
         .eq("id", test_id)
         .execute()
@@ -33,12 +34,11 @@ async def _assert_test_ownership(user_id: str, test_id: str) -> dict:
 async def update_test(
     test_id: str,
     data: MedicalTestUpdate,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     """Human correction of an extracted medical test value."""
-    original = await _assert_test_ownership(user_id, test_id)
+    original = await _assert_test_ownership(auth_user.user_id, test_id, client=auth_user.client)
 
-    client = get_service_client()
     payload = {k: v for k, v in data.model_dump(exclude_none=True).items()}
 
     # Recalculate status if value or range is being updated
@@ -54,24 +54,23 @@ async def update_test(
             else original.get("value_text")
         )
 
-    result = client.table("medical_tests").update(payload).eq("id", test_id).execute()
+    result = auth_user.client.table("medical_tests").update(payload).eq("id", test_id).execute()
     return SuccessResponse(message="Test updated", data=result.data[0] if result.data else None)
 
 
 @router.post("/{test_id}/verify", response_model=SuccessResponse)
 async def verify_test(
     test_id: str,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     """Mark an extracted test as human-verified (no corrections needed)."""
-    await _assert_test_ownership(user_id, test_id)
+    await _assert_test_ownership(auth_user.user_id, test_id, client=auth_user.client)
 
-    client = get_service_client()
     payload = {
         "verification_status": "verified",
         "verified_at": datetime.now(timezone.utc).isoformat(),
     }
-    result = client.table("medical_tests").update(payload).eq("id", test_id).execute()
+    result = auth_user.client.table("medical_tests").update(payload).eq("id", test_id).execute()
     return SuccessResponse(message="Test verified", data=result.data[0] if result.data else None)
 
 
@@ -79,12 +78,11 @@ async def verify_test(
 async def correct_and_verify_test(
     test_id: str,
     data: MedicalTestUpdate,
-    user_id: str = Depends(get_current_user_id),
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
 ):
     """Apply corrections and mark as corrected (not original) in one step."""
-    original = await _assert_test_ownership(user_id, test_id)
+    original = await _assert_test_ownership(auth_user.user_id, test_id, client=auth_user.client)
 
-    client = get_service_client()
     payload = {k: v for k, v in data.model_dump(exclude_none=True).items()}
 
     # Recalculate status deterministically
@@ -103,5 +101,6 @@ async def correct_and_verify_test(
     payload["verification_status"] = "corrected"
     payload["verified_at"] = datetime.now(timezone.utc).isoformat()
 
-    result = client.table("medical_tests").update(payload).eq("id", test_id).execute()
+    result = auth_user.client.table("medical_tests").update(payload).eq("id", test_id).execute()
     return SuccessResponse(message="Test corrected and verified", data=result.data[0] if result.data else None)
+

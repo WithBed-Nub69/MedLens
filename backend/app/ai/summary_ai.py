@@ -8,6 +8,8 @@ from typing import Optional
 from app.ai.groq_provider import get_groq_provider
 from app.database.client import get_service_client
 
+from supabase import Client
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,22 +64,22 @@ def _build_summary_prompt(patient: dict, tests: list[dict], reports: list[dict])
     return "\n".join(lines)
 
 
-async def generate_patient_summary(patient_id: str) -> dict:
+async def generate_patient_summary(patient_id: str, client: Optional[Client] = None) -> dict:
     """
     Generate and upsert an AI summary for a patient.
     Returns the created/updated summary record.
     """
-    client = get_service_client()
+    db = client or get_service_client()
 
     # Fetch patient data
-    patient_result = client.table("patients").select("*").eq("id", patient_id).single().execute()
+    patient_result = db.table("patients").select("*").eq("id", patient_id).single().execute()
     if not patient_result.data:
         raise ValueError(f"Patient {patient_id} not found")
     patient = patient_result.data
 
     # Fetch verified + pending tests
     tests_result = (
-        client.table("medical_tests")
+        db.table("medical_tests")
         .select("*")
         .eq("patient_id", patient_id)
         .order("created_at", desc=True)
@@ -87,7 +89,7 @@ async def generate_patient_summary(patient_id: str) -> dict:
 
     # Fetch reports
     reports_result = (
-        client.table("medical_reports")
+        db.table("medical_reports")
         .select("id, file_name, report_type, report_date, processing_status")
         .eq("patient_id", patient_id)
         .execute()
@@ -99,9 +101,9 @@ async def generate_patient_summary(patient_id: str) -> dict:
     summary_text = await provider.generate_summary(prompt)
 
     # Upsert summary (delete old, insert new — table has no unique constraint on patient_id)
-    client.table("ai_summaries").delete().eq("patient_id", patient_id).execute()
+    db.table("ai_summaries").delete().eq("patient_id", patient_id).execute()
 
-    result = client.table("ai_summaries").insert({
+    result = db.table("ai_summaries").insert({
         "patient_id": patient_id,
         "summary_text": summary_text,
         "model_name": provider.model_name,
@@ -114,11 +116,11 @@ async def generate_patient_summary(patient_id: str) -> dict:
     return result.data[0]
 
 
-async def generate_clarification_questions(patient_id: str) -> list[str]:
+async def generate_clarification_questions(patient_id: str, client: Optional[Client] = None) -> list[str]:
     """Generate 3-5 clarification questions based on patient info."""
-    client = get_service_client()
+    db = client or get_service_client()
 
-    patient_result = client.table("patients").select("*").eq("id", patient_id).single().execute()
+    patient_result = db.table("patients").select("*").eq("id", patient_id).single().execute()
     if not patient_result.data:
         return []
     patient = patient_result.data
