@@ -25,10 +25,11 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS — allow the React dev server
+# CORS — allow local development and Vercel deployments
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
+    allow_origin_regex=r"^https:\/\/.*\.vercel\.app$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
