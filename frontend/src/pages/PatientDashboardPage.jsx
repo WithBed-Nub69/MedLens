@@ -5,7 +5,7 @@ import MedicalTestCard from '../components/MedicalTestCard'
 import { ProcessingBadge, ProvenanceTag } from '../components/Badges'
 import {
   User, FileText, FlaskConical, Brain, Upload, RefreshCw,
-  ChevronLeft, AlertTriangle, HelpCircle, Plus, Loader
+  ChevronLeft, AlertTriangle, HelpCircle, Plus, Loader, Trash2
 } from 'lucide-react'
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -32,9 +32,97 @@ function InfoSection({ title, icon, items, color, provenance = 'user' }) {
   )
 }
 
+// Lightweight markdown → JSX renderer (no extra deps)
+function renderMarkdown(text) {
+  if (!text) return null
+  const lines = text.split('\n')
+  const elements = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // Skip blank lines between blocks
+    if (line.trim() === '') { i++; continue }
+
+    // --- Horizontal rule
+    if (/^---+$/.test(line.trim())) {
+      elements.push(<hr key={i} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '12px 0' }} />)
+      i++; continue
+    }
+
+    // ### H3 / ## H2 / # H1
+    const headingMatch = line.match(/^(#{1,3})\s+(.+)/)
+    if (headingMatch) {
+      const level = headingMatch[1].length
+      const content = headingMatch[2]
+      const sizes = { 1: '1.1rem', 2: '1rem', 3: '0.95rem' }
+      elements.push(
+        <div key={i} style={{
+          fontWeight: 700,
+          fontSize: sizes[level],
+          color: 'var(--text-primary)',
+          marginTop: level === 1 ? 20 : 14,
+          marginBottom: 6,
+          paddingBottom: level <= 2 ? 4 : 0,
+          borderBottom: level <= 2 ? '1px solid var(--border)' : 'none',
+          letterSpacing: '0.01em'
+        }}>
+          {inlineFormat(content)}
+        </div>
+      )
+      i++; continue
+    }
+
+    // Bullet list: lines starting with * or -
+    if (/^[*-]\s/.test(line)) {
+      const items = []
+      while (i < lines.length && /^[*-]\s/.test(lines[i])) {
+        items.push(lines[i].replace(/^[*-]\s/, ''))
+        i++
+      }
+      elements.push(
+        <ul key={`ul-${i}`} style={{ margin: '6px 0 10px 0', paddingLeft: 20, listStyle: 'none' }}>
+          {items.map((item, idx) => (
+            <li key={idx} style={{ display: 'flex', gap: 8, marginBottom: 5, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+              <span style={{ color: 'var(--accent)', marginTop: 2, flexShrink: 0 }}>•</span>
+              <span>{inlineFormat(item)}</span>
+            </li>
+          ))}
+        </ul>
+      )
+      continue
+    }
+
+    // Normal paragraph
+    elements.push(
+      <p key={i} style={{ margin: '4px 0 8px 0', color: 'var(--text-secondary)', lineHeight: 1.65 }}>
+        {inlineFormat(line)}
+      </p>
+    )
+    i++
+  }
+
+  return elements
+}
+
+// Inline: **bold**, *italic*
+function inlineFormat(text) {
+  const parts = []
+  const regex = /(\*\*(.+?)\*\*|\*(.+?)\*)/g
+  let last = 0, m
+  while ((m = regex.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    if (m[2]) parts.push(<strong key={m.index} style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{m[2]}</strong>)
+    else if (m[3]) parts.push(<em key={m.index}>{m[3]}</em>)
+    last = m.index + m[0].length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return parts.length ? parts : text
+}
+
 function AISummaryPanel({ patientId }) {
   const [summary, setSummary] = useState(null)
-  const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
 
   useEffect(() => {
@@ -77,7 +165,9 @@ function AISummaryPanel({ patientId }) {
       </div>
 
       {summary ? (
-        <div className="ai-summary-text">{summary.summary_text}</div>
+        <div className="ai-summary-body">
+          {renderMarkdown(summary.summary_text)}
+        </div>
       ) : (
         <div className="empty-state" style={{ padding: '24px 0' }}>
           <div style={{ fontSize: '32px' }}>🧠</div>
@@ -153,6 +243,21 @@ export default function PatientDashboardPage() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('overview')
   const [refreshingReports, setRefreshingReports] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const handleDeletePatient = async () => {
+    if (!window.confirm(`Are you sure you want to delete patient "${patient.full_name}"? This will permanently delete all associated reports, lab results, and AI summaries.`)) {
+      return
+    }
+    setDeleting(true)
+    try {
+      await patientService.deletePatient(patientId)
+      navigate('/')
+    } catch (err) {
+      alert(err.userMessage || err.message || 'Failed to delete patient')
+      setDeleting(false)
+    }
+  }
 
   const fetchAll = useCallback(async () => {
     try {
@@ -235,9 +340,20 @@ export default function PatientDashboardPage() {
               <span className="patient-meta-item">🧪 {tests.length} test{tests.length !== 1 ? 's' : ''}</span>
             </div>
           </div>
-          <button className="btn btn-primary btn-sm" onClick={() => navigate(`/patients/${patientId}/reports/upload`)}>
-            <Upload size={14} /> Add Report
-          </button>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <button className="btn btn-primary btn-sm" onClick={() => navigate(`/patients/${patientId}/reports/upload`)}>
+              <Upload size={14} /> Add Report
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              style={{ color: 'var(--accent-red)', borderColor: 'rgba(245, 101, 101, 0.3)' }}
+              onClick={handleDeletePatient}
+              disabled={deleting}
+              title="Delete Patient Record"
+            >
+              <Trash2 size={14} /> {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
         </div>
 
         {/* Processing banner */}

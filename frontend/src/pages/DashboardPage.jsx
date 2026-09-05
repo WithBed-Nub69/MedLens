@@ -3,9 +3,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { patientService } from '../services/medlens'
 import { ProcessingBadge } from '../components/Badges'
-import { Plus, User, FileText, ChevronRight, Activity, TrendingUp } from 'lucide-react'
+import { Plus, User, FileText, ChevronRight, Activity, TrendingUp, Trash2 } from 'lucide-react'
 
-function PatientCard({ patient }) {
+function PatientCard({ patient, onDelete }) {
   const navigate = useNavigate()
   const initials = patient.full_name
     ?.split(' ')
@@ -67,9 +67,25 @@ function PatientCard({ patient }) {
         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
           Added {new Date(patient.created_at).toLocaleDateString()}
         </span>
-        <span style={{ fontSize: '0.75rem', color: 'var(--accent-blue)', display: 'flex', alignItems: 'center', gap: 4 }}>
-          View Record <ChevronRight size={12} />
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {onDelete && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ padding: '4px 6px', color: 'var(--accent-red)', height: 'auto' }}
+              title="Delete Patient"
+              onClick={(e) => {
+                e.stopPropagation()
+                onDelete(patient)
+              }}
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+          <span style={{ fontSize: '0.75rem', color: 'var(--accent-blue)', display: 'flex', alignItems: 'center', gap: 4 }}>
+            View Record <ChevronRight size={12} />
+          </span>
+        </div>
       </div>
     </div>
   )
@@ -93,6 +109,18 @@ export default function DashboardPage() {
     if (h < 12) return 'Good morning'
     if (h < 17) return 'Good afternoon'
     return 'Good evening'
+  }
+
+  const handleDeletePatient = async (p) => {
+    if (!window.confirm(`Are you sure you want to delete patient "${p.full_name}"? This will permanently delete all associated reports, lab results, and AI summaries.`)) {
+      return
+    }
+    try {
+      await patientService.deletePatient(p.id)
+      setPatients(prev => prev.filter(item => item.id !== p.id))
+    } catch (err) {
+      alert(err.userMessage || err.message || 'Failed to delete patient')
+    }
   }
 
   return (
@@ -164,7 +192,7 @@ export default function DashboardPage() {
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
-            {patients.map(p => <PatientCard key={p.id} patient={p} />)}
+            {patients.map(p => <PatientCard key={p.id} patient={p} onDelete={handleDeletePatient} />)}
           </div>
         )}
 

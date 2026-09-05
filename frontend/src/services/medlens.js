@@ -21,6 +21,11 @@ export const patientService = {
     return res.data.data
   },
 
+  async deletePatient(patientId) {
+    const res = await api.delete(`/patients/${patientId}`)
+    return res.data
+  },
+
   async getTests(patientId) {
     const res = await api.get(`/patients/${patientId}/tests`)
     return res.data.data

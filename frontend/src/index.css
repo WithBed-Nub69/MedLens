@@ -488,11 +488,22 @@ label {
   text-transform: uppercase;
 }
 
-.ai-summary-text {
+.ai-summary-body {
   font-size: 0.9rem;
-  color: var(--text-secondary);
-  line-height: 1.7;
-  white-space: pre-line;
+  padding: 4px 0 8px 0;
+}
+
+.ai-summary-body p,
+.ai-summary-body li {
+  font-size: 0.9rem;
+}
+
+.ai-summary-body ul {
+  padding-left: 8px;
+}
+
+.ai-summary-body strong {
+  font-weight: 600;
 }
 
 /* ── Upload Zone ─────────────────────────────────────────────────────────────── */

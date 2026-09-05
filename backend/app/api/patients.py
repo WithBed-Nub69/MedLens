@@ -56,6 +56,17 @@ async def update_patient(
     return SuccessResponse(message="Patient updated", data=updated)
 
 
+@router.delete("/{patient_id}", response_model=SuccessResponse)
+async def delete_patient(
+    patient_id: str,
+    auth_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    deleted = await patient_service.delete_patient(auth_user.user_id, patient_id, client=auth_user.client)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return SuccessResponse(message="Patient deleted successfully")
+
+
 @router.get("/{patient_id}/tests", response_model=SuccessResponse)
 async def get_patient_tests(
     patient_id: str,

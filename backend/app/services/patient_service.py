@@ -90,10 +90,21 @@ async def update_patient(user_id: str, patient_id: str, data: PatientUpdate, cli
     return result.data[0] if result.data else None
 
 
+async def delete_patient(user_id: str, patient_id: str, client: Optional[Client] = None) -> bool:
+    db = client or get_service_client()
+    existing = await get_patient(user_id, patient_id, client=db)
+    if not existing:
+        return False
+
+    db.table("patients").delete().eq("id", patient_id).eq("user_id", user_id).execute()
+    return True
+
+
 async def assert_patient_ownership(user_id: str, patient_id: str, client: Optional[Client] = None) -> dict:
     """Raises ValueError if user does not own this patient."""
     patient = await get_patient(user_id, patient_id, client=client)
     if not patient:
         raise ValueError(f"Patient {patient_id} not found or access denied")
     return patient
+
 
