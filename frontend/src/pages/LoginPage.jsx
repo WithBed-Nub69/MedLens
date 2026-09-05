@@ -38,8 +38,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="auth-bg">
-      <div className="auth-card animate-in">
+    <div className="auth-bg" role="main" aria-label="Authentication page">
+      <div className="auth-card animate-in" role="form" aria-labelledby="auth-title">
         <div className="auth-logo">
           <div className="auth-logo-mark">
             <Activity size={22} color="#080c12" strokeWidth={2.5} />
@@ -50,7 +50,7 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <h2 style={{ marginBottom: 6 }}>
+        <h2 id="auth-title" style={{ marginBottom: 6 }}>
           {mode === 'login' ? 'Sign in to your account' : 'Create your account'}
         </h2>
         <p style={{ fontSize: '0.875rem', marginBottom: 28, color: 'var(--text-secondary)' }}>
@@ -60,17 +60,17 @@ export default function LoginPage() {
         </p>
 
         {error && (
-          <div className="alert alert-error" style={{ marginBottom: 16 }}>
-            <span>⚠</span> {error}
+          <div className="alert alert-error" role="alert" aria-live="assertive" style={{ marginBottom: 16 }}>
+            <span aria-hidden="true">⚠</span> {error}
           </div>
         )}
         {success && (
-          <div className="alert alert-success" style={{ marginBottom: 16 }}>
-            <span>✓</span> {success}
+          <div className="alert alert-success" role="status" aria-live="polite" style={{ marginBottom: 16 }}>
+            <span aria-hidden="true">✓</span> {success}
           </div>
         )}
 
-        <form className="auth-form" onSubmit={handleSubmit}>
+        <form className="auth-form" onSubmit={handleSubmit} aria-label={mode === 'login' ? 'Sign in form' : 'Sign up form'}>
           <div className="form-group">
             <label htmlFor="email">Email address</label>
             <input
@@ -105,8 +105,9 @@ export default function LoginPage() {
                 className="btn btn-ghost btn-icon"
                 onClick={() => setShowPass(!showPass)}
                 style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)' }}
+                aria-label={showPass ? 'Hide password' : 'Show password'}
               >
-                {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                {showPass ? <EyeOff size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
               </button>
             </div>
             {mode === 'signup' && (

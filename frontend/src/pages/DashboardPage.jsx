@@ -19,6 +19,10 @@ function PatientCard({ patient, onDelete }) {
       className="card-floating"
       style={{ cursor: 'pointer' }}
       onClick={() => navigate(`/patients/${patient.id}`)}
+      role="article"
+      aria-label={`Patient record for ${patient.full_name}`}
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/patients/${patient.id}`) }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 16 }}>
         <div
@@ -74,6 +78,7 @@ function PatientCard({ patient, onDelete }) {
               className="btn btn-ghost btn-sm"
               style={{ padding: '4px 6px', color: 'var(--accent-red)', height: 'auto' }}
               title="Delete Patient"
+              aria-label={`Delete patient ${patient.full_name}`}
               onClick={(e) => {
                 e.stopPropagation()
                 onDelete(patient)
@@ -124,10 +129,10 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="page-content">
+    <div className="page-content" role="main" aria-label="Dashboard">
       <div className="page-container" style={{ paddingTop: 48, paddingBottom: 60 }}>
         {/* Hero */}
-        <div className="dashboard-hero" style={{ padding: 0, marginBottom: 40 }}>
+        <div className="dashboard-hero" style={{ padding: 0, marginBottom: 40 }} role="banner" aria-label="Dashboard summary">
           <div style={{ marginBottom: 8 }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--accent-teal)', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
               MedLens Dashboard
@@ -159,15 +164,15 @@ export default function DashboardPage() {
         </div>
 
         {/* Patients Section */}
-        <div className="section-header">
+        <div className="section-header" role="heading" aria-level="2">
           <div className="section-title">
             <div className="section-icon" style={{ background: 'rgba(79,209,197,0.1)', color: 'var(--accent-teal)' }}>
               <User size={14} />
             </div>
             Patient Records
           </div>
-          <button className="btn btn-primary btn-sm" onClick={() => navigate('/patients/new')}>
-            <Plus size={14} />
+          <button className="btn btn-primary btn-sm" onClick={() => navigate('/patients/new')} aria-label="Add a new patient record">
+            <Plus size={14} aria-hidden="true" />
             Add Patient
           </button>
         </div>
@@ -191,7 +196,7 @@ export default function DashboardPage() {
             </div>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }} role="list" aria-label="Patient records">
             {patients.map(p => <PatientCard key={p.id} patient={p} onDelete={handleDeletePatient} />)}
           </div>
         )}
