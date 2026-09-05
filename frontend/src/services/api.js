@@ -6,7 +6,7 @@ const api = axios.create({
     import.meta.env.VITE_API_BASE_URL ||
     (import.meta.env.DEV
       ? 'http://localhost:8000/api'
-      : 'https://medlens-backend.onrender.com/api'),
+      : 'https://medlens-d5jo.onrender.com/api'),
   timeout: 60000,
 })
 
