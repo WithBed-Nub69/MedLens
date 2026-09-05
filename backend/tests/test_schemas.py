@@ -36,7 +36,7 @@ class TestPatientCreate:
             existing_conditions=["diabetes"],
             allergies=["penicillin"],
             medications=["metformin"],
-            notes="Test patient",
+            notes=["Test patient"],
         )
         assert len(patient.symptoms) == 2
         assert "penicillin" in patient.allergies
