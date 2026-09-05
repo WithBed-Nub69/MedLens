@@ -2,7 +2,11 @@ import axios from 'axios'
 import { supabase } from './supabase'
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api',
+  baseURL:
+    import.meta.env.VITE_API_BASE_URL ||
+    (import.meta.env.DEV
+      ? 'http://localhost:8000/api'
+      : 'https://medlens-backend.onrender.com/api'),
   timeout: 60000,
 })
 
