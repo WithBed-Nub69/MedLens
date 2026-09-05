@@ -72,7 +72,7 @@ for canonical, aliases in NORMALIZATION_MAP.items():
         _REVERSE[alias.lower().strip()] = canonical
 
 
-def normalize_test_name(raw_name: str) -> Optional[str]:
+def normalize_test_name(raw_name: Optional[str]) -> Optional[str]:
     """
     Return the canonical name for a raw test name, or None if unrecognized.
     Never modifies the original; caller stores both.
